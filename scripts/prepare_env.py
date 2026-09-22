@@ -7,14 +7,29 @@ import json
 import os
 
 
+def find_service_account_json():
+    """Busca un archivo JSON de cuenta de servicio de Google en la carpeta actual."""
+    for filename in os.listdir("."):
+        if not filename.endswith(".json"):
+            continue
+        try:
+            with open(filename, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            if data.get("type") == "service_account":
+                return filename, data
+        except (json.JSONDecodeError, OSError):
+            continue
+    return None, None
+
+
 def main():
-    json_path = "service_account.json"
-    if not os.path.exists(json_path):
-        print(f"No se encontró {json_path}. Descarga la clave JSON de Google Cloud y guárdala aquí.")
+    json_path, credentials = find_service_account_json()
+    if not credentials:
+        print("No se encontró un archivo JSON de cuenta de servicio de Google en esta carpeta.")
+        print("Descarga la clave JSON de Google Cloud y guárdala aquí.")
         return
 
-    with open(json_path, "r", encoding="utf-8") as f:
-        credentials = json.load(f)
+    print(f"Usando credenciales de: {json_path}")
 
     spreadsheet_id = input("Pega el ID de tu hoja de Google Sheets: ").strip()
 
