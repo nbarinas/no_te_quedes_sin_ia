@@ -1,0 +1,110 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>WhatsApp Talleres IA</title>
+    <style>
+        body { font-family: system-ui, sans-serif; margin: 2rem; background: #f8f9fa; }
+        .container { max-width: 900px; margin: 0 auto; background: white; padding: 2rem; border-radius: 8px; }
+        h1 { margin-top: 0; }
+        label { display: block; margin-top: 1rem; font-weight: 600; }
+        select, textarea, button { width: 100%; padding: 0.6rem; margin-top: 0.4rem; border-radius: 4px; border: 1px solid #ccc; font-size: 1rem; }
+        button { background: #0066ff; color: white; border: none; cursor: pointer; }
+        button:hover { background: #0052cc; }
+        .mensaje { padding: 0.8rem; margin: 0.5rem 0; border-radius: 6px; }
+        .entrante { background: #e9f5ff; }
+        .saliente { background: #e6ffed; text-align: right; }
+        .meta { font-size: 0.75rem; color: #666; }
+        #respuesta { margin-top: 1rem; }
+        .acciones { display: flex; gap: 1rem; margin-top: 1rem; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>WhatsApp - Talleres de IA</h1>
+
+        <div class="acciones">
+            <button onclick="enviarLote()">Enviar lote de 50</button>
+            <button onclick="cargarConversaciones()">Recargar conversaciones</button>
+        </div>
+
+        <label for="telefono">Número de contacto</label>
+        <select id="telefono" onchange="cargarConversaciones()">
+            <option value="">Selecciona un número</option>
+            {% for phone in phones %}
+            <option value="{{ phone }}">{{ phone }}</option>
+            {% endfor %}
+        </select>
+
+        <h2>Conversación</h2>
+        <div id="conversacion"></div>
+
+        <div id="respuesta">
+            <label for="mensaje">Responder</label>
+            <textarea id="mensaje" rows="3" placeholder="Escribe tu respuesta..."></textarea>
+            <button onclick="responder()">Enviar respuesta</button>
+        </div>
+
+        <p id="estado" style="margin-top:1rem; color:#333;"></p>
+    </div>
+
+    <script>
+        async function enviarLote() {
+            document.getElementById('estado').innerText = 'Enviando lote...';
+            try {
+                const res = await fetch('/api/send-batch', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({limit: 50})
+                });
+                const data = await res.json();
+                document.getElementById('estado').innerText = `Enviados: ${data.enviados}, Errores: ${data.errores}`;
+            } catch (e) {
+                document.getElementById('estado').innerText = 'Error: ' + e.message;
+            }
+        }
+
+        async function cargarConversaciones() {
+            const phone = document.getElementById('telefono').value;
+            if (!phone) return;
+            const res = await fetch('/api/conversations?telefono=' + encodeURIComponent(phone));
+            const data = await res.json();
+            const box = document.getElementById('conversacion');
+            box.innerHTML = '';
+            data.conversaciones.forEach(c => {
+                const div = document.createElement('div');
+                div.className = 'mensaje ' + c.tipo;
+                div.innerHTML = `<div>${escapeHtml(c.mensaje)}</div><div class="meta">${c.fecha} · ${c.agente}</div>`;
+                box.appendChild(div);
+            });
+        }
+
+        async function responder() {
+            const phone = document.getElementById('telefono').value;
+            const text = document.getElementById('mensaje').value;
+            if (!phone || !text) return alert('Selecciona un número y escribe un mensaje');
+            document.getElementById('estado').innerText = 'Enviando respuesta...';
+            try {
+                const res = await fetch('/api/reply', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({telefono: phone, mensaje: text})
+                });
+                if (!res.ok) throw new Error(await res.text());
+                document.getElementById('mensaje').value = '';
+                await cargarConversaciones();
+                document.getElementById('estado').innerText = 'Respuesta enviada';
+            } catch (e) {
+                document.getElementById('estado').innerText = 'Error: ' + e.message;
+            }
+        }
+
+        function escapeHtml(text) {
+            const div = document.createElement('div');
+            div.textContent = text;
+            return div.innerHTML;
+        }
+    </script>
+</body>
+</html>
