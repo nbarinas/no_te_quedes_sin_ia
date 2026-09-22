@@ -10,9 +10,8 @@ Sistema para enviar mensajes masivos de WhatsApp usando la API oficial de Meta, 
 python -m venv .venv
 source .venv/bin/activate
 pip install -r requirements.txt
-cp .env.example .env
-# completa .env
-python scripts/setup_sheets.py
+python scripts/prepare_env.py
+python -m scripts.setup_sheets
 uvicorn app.main:app --reload
 ```
 
@@ -25,6 +24,7 @@ uvicorn app.main:app --reload
 - `app/routes/`: endpoints de envío, webhook y dashboard.
 - `app/templates/dashboard.html`: panel web simple.
 - `scripts/setup_sheets.py`: crea encabezados de las hojas.
+- `scripts/prepare_env.py`: genera el archivo `.env` desde el JSON de Google.
 - `render.yaml`: configuración de despliegue en Render.
 
 ## Convenciones

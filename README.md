@@ -44,7 +44,13 @@ cp .env.example .env
 Para crear las hojas y encabezados:
 
 ```bash
-python scripts/setup_sheets.py
+python -m scripts.setup_sheets
+```
+
+También puedes usar el helper interactivo para generar el `.env`:
+
+```bash
+python scripts/prepare_env.py
 ```
 
 ## Configurar Meta WhatsApp Cloud API
