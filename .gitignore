@@ -17,3 +17,5 @@ Thumbs.db
 # Google credentials (no subir nunca)
 *credentials*.json
 service_account*.json
+gen-lang-client-*.json
+project-id-*.json
