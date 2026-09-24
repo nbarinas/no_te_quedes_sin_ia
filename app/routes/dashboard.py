@@ -11,12 +11,21 @@ templates = Jinja2Templates(directory="app/templates")
 @router.get("/", response_class=HTMLResponse)
 def dashboard(request: Request):
     sheets = get_sheets_client()
-    phones = sheets.get_contact_phones()
-    pendientes = sheets.count_pending_contacts()
+    contacts = sheets.get_contacts_for_sidebar()
+    stats = {
+        "pendientes": sheets.count_pending_contacts(),
+        "bloqueados": len(sheets.get_blocked_phones()),
+    }
     return templates.TemplateResponse(
         "dashboard.html",
-        {"request": request, "phones": phones, "pendientes": pendientes}
+        {"request": request, "contacts": contacts, "stats": stats}
     )
+
+
+@router.get("/api/contacts")
+def list_contacts():
+    sheets = get_sheets_client()
+    return {"contactos": sheets.get_contacts_for_sidebar()}
 
 
 @router.get("/api/conversations")

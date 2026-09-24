@@ -133,6 +133,32 @@ class SheetsClient:
         records = self._get_contact_records()
         return [str(r["telefono"]).strip() for r in records if r.get("telefono")]
 
+    def get_contacts_for_sidebar(self) -> List[dict]:
+        contacts = self._get_contact_records()
+        conversations = self.get_conversations(limite=1000)
+        last_by_phone = {}
+        for c in conversations:
+            phone = str(c.get("telefono", "")).strip()
+            if phone and phone not in last_by_phone:
+                last_by_phone[phone] = c
+
+        result = []
+        for record in contacts:
+            phone = str(record.get("telefono", "")).strip()
+            if not phone:
+                continue
+            bloqueado = str(record.get("bloqueado", "")).strip().lower() in ("si", "yes", "true", "1")
+            last = last_by_phone.get(phone, {})
+            result.append({
+                "telefono": phone,
+                "nombre": str(record.get("nombre", "")).strip() or phone,
+                "bloqueado": bloqueado,
+                "estado": str(record.get("estado", "")).strip().lower(),
+                "ultimo_mensaje": str(last.get("mensaje", ""))[:60],
+                "ultima_fecha": last.get("fecha", ""),
+            })
+        return result
+
     def count_pending_contacts(self) -> int:
         records = self._get_contact_records()
         count = 0
