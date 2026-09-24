@@ -26,6 +26,10 @@ class ReplyRequest(BaseModel):
     mensaje: str
 
 
+class BlockRequest(BaseModel):
+    telefono: str
+
+
 @router.post("/send-batch")
 async def send_batch(payload: BatchRequest):
     sheets = get_sheets_client()
@@ -59,8 +63,14 @@ async def send_batch(payload: BatchRequest):
             sheets.add_conversation(telefono, "saliente", DEFAULT_MESSAGE.format(nombre=nombre), agente="bot")
             results.append({"telefono": telefono, "status": "enviado", "nombre": nombre})
         except Exception as exc:
-            sheets.update_contact_status(telefono, "error", notas=str(exc))
-            results.append({"telefono": telefono, "status": "error", "error": str(exc)})
+            error_msg = str(exc)
+            if hasattr(exc, "response"):
+                try:
+                    error_msg = f"{error_msg} | {exc.response.text}"
+                except Exception:
+                    pass
+            sheets.update_contact_status(telefono, "error", notas=error_msg[:500])
+            results.append({"telefono": telefono, "status": "error", "error": error_msg})
 
     return {
         "enviados": sum(1 for r in results if r["status"] == "enviado"),
@@ -84,3 +94,26 @@ async def reply(payload: ReplyRequest):
         return {"status": "enviado"}
     except Exception as exc:
         raise HTTPException(status_code=500, detail=str(exc))
+
+
+@router.post("/block")
+async def block_number(payload: BlockRequest):
+    sheets = get_sheets_client()
+    phones = sheets.get_contact_phones()
+    if payload.telefono.strip() not in phones:
+        raise HTTPException(status_code=404, detail="Número no encontrado en contactos")
+
+    sheets.set_block_status(payload.telefono, True)
+    sheets.add_conversation(payload.telefono, "sistema", "Número bloqueado por solicitud del usuario", agente="sistema")
+    return {"status": "bloqueado"}
+
+
+@router.post("/unblock")
+async def unblock_number(payload: BlockRequest):
+    sheets = get_sheets_client()
+    phones = sheets.get_contact_phones()
+    if payload.telefono.strip() not in phones:
+        raise HTTPException(status_code=404, detail="Número no encontrado en contactos")
+
+    sheets.set_block_status(payload.telefono, False)
+    return {"status": "desbloqueado"}

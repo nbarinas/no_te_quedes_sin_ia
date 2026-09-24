@@ -17,7 +17,7 @@ SCOPES = [
 SHEET_CONTACTOS = "contactos"
 SHEET_CONVERSACIONES = "conversaciones"
 
-CONTACTOS_HEADERS = ["nombre", "telefono", "estado", "fecha_envio", "notas"]
+CONTACTOS_HEADERS = ["nombre", "telefono", "estado", "fecha_envio", "notas", "bloqueado"]
 CONVERSACIONES_HEADERS = ["telefono", "tipo", "mensaje", "fecha", "agente"]
 
 
@@ -43,34 +43,77 @@ class SheetsClient:
         contactos = self._get_or_create_sheet(SHEET_CONTACTOS)
         conversaciones = self._get_or_create_sheet(SHEET_CONVERSACIONES)
 
-        if not contactos.row_values(1):
-            contactos.append_row(CONTACTOS_HEADERS)
-        if not conversaciones.row_values(1):
-            conversaciones.append_row(CONVERSACIONES_HEADERS)
+        self._ensure_sheet_headers(contactos, CONTACTOS_HEADERS)
+        self._ensure_sheet_headers(conversaciones, CONVERSACIONES_HEADERS)
+
+    def _ensure_sheet_headers(self, sheet: gspread.Worksheet, expected_headers: List[str]):
+        current = sheet.row_values(1)
+        if not current:
+            sheet.append_row(expected_headers)
+            return
+
+        # Si faltan columnas, agregarlas al final
+        missing = [h for h in expected_headers if h not in current]
+        if missing:
+            next_col = len(current) + 1
+            for idx, header in enumerate(missing):
+                sheet.update_cell(1, next_col + idx, header)
+
+    def _get_contact_records(self) -> List[dict]:
+        sheet = self._get_or_create_sheet(SHEET_CONTACTOS)
+        try:
+            return sheet.get_all_records(expected_headers=CONTACTOS_HEADERS)
+        except gspread.GSpreadException:
+            # Fallback por si los encabezados no coinciden exactamente
+            return sheet.get_all_records()
 
     def get_pending_contacts(self, limit: int = 50) -> List[dict]:
-        sheet = self._get_or_create_sheet(SHEET_CONTACTOS)
-        records = sheet.get_all_records(expected_headers=CONTACTOS_HEADERS)
+        records = self._get_contact_records()
         pending = []
         for record in records:
             estado = str(record.get("estado", "")).strip().lower()
+            bloqueado = str(record.get("bloqueado", "")).strip().lower()
+            if bloqueado in ("si", "yes", "true", "1"):
+                continue
             if estado in ("", "pendiente", "no enviado"):
                 pending.append(record)
             if len(pending) >= limit:
                 break
         return pending
 
-    def update_contact_status(self, telefono: str, estado: str, notas: str = ""):
+    def get_blocked_phones(self) -> List[str]:
+        records = self._get_contact_records()
+        blocked = []
+        for record in records:
+            bloqueado = str(record.get("bloqueado", "")).strip().lower()
+            if bloqueado in ("si", "yes", "true", "1"):
+                blocked.append(str(record.get("telefono", "")).strip())
+        return blocked
+
+    def set_block_status(self, telefono: str, bloqueado: bool) -> bool:
         sheet = self._get_or_create_sheet(SHEET_CONTACTOS)
-        records = sheet.get_all_records(expected_headers=CONTACTOS_HEADERS)
+        records = self._get_contact_records()
+        col_idx = self._header_index(sheet, "bloqueado")
         for idx, record in enumerate(records, start=2):
             if str(record.get("telefono", "")).strip() == telefono.strip():
-                sheet.update_cell(idx, CONTACTOS_HEADERS.index("estado") + 1, estado)
-                sheet.update_cell(
-                    idx, CONTACTOS_HEADERS.index("fecha_envio") + 1, now_iso()
-                )
+                value = "si" if bloqueado else "no"
+                sheet.update_cell(idx, col_idx, value)
+                return True
+        return False
+
+    def _header_index(self, sheet: gspread.Worksheet, header: str) -> int:
+        headers = [h.strip().lower() for h in sheet.row_values(1)]
+        return headers.index(header.lower()) + 1
+
+    def update_contact_status(self, telefono: str, estado: str, notas: str = ""):
+        sheet = self._get_or_create_sheet(SHEET_CONTACTOS)
+        records = self._get_contact_records()
+        for idx, record in enumerate(records, start=2):
+            if str(record.get("telefono", "")).strip() == telefono.strip():
+                sheet.update_cell(idx, self._header_index(sheet, "estado"), estado)
+                sheet.update_cell(idx, self._header_index(sheet, "fecha_envio"), now_iso())
                 if notas:
-                    sheet.update_cell(idx, CONTACTOS_HEADERS.index("notas") + 1, notas)
+                    sheet.update_cell(idx, self._header_index(sheet, "notas"), notas)
                 return True
         return False
 
@@ -78,17 +121,29 @@ class SheetsClient:
         sheet = self._get_or_create_sheet(SHEET_CONVERSACIONES)
         sheet.append_row([telefono, tipo, mensaje, now_iso(), agente])
 
-    def get_conversations(self, telefono: Optional[str] = None) -> List[dict]:
+    def get_conversations(self, telefono: Optional[str] = None, limite: int = 20) -> List[dict]:
         sheet = self._get_or_create_sheet(SHEET_CONVERSACIONES)
         records = sheet.get_all_records(expected_headers=CONVERSACIONES_HEADERS)
         if telefono:
             records = [r for r in records if str(r.get("telefono", "")).strip() == telefono.strip()]
-        return records
+        records.sort(key=lambda r: r.get("fecha", ""), reverse=True)
+        return records[:limite]
 
     def get_contact_phones(self) -> List[str]:
-        sheet = self._get_or_create_sheet(SHEET_CONTACTOS)
-        records = sheet.get_all_records(expected_headers=CONTACTOS_HEADERS)
+        records = self._get_contact_records()
         return [str(r["telefono"]).strip() for r in records if r.get("telefono")]
+
+    def count_pending_contacts(self) -> int:
+        records = self._get_contact_records()
+        count = 0
+        for record in records:
+            estado = str(record.get("estado", "")).strip().lower()
+            bloqueado = str(record.get("bloqueado", "")).strip().lower()
+            if bloqueado in ("si", "yes", "true", "1"):
+                continue
+            if estado in ("", "pendiente", "no enviado"):
+                count += 1
+        return count
 
 
 def now_iso() -> str:

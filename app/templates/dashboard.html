@@ -9,26 +9,50 @@
         .container { max-width: 900px; margin: 0 auto; background: white; padding: 2rem; border-radius: 8px; }
         h1 { margin-top: 0; }
         label { display: block; margin-top: 1rem; font-weight: 600; }
-        select, textarea, button { width: 100%; padding: 0.6rem; margin-top: 0.4rem; border-radius: 4px; border: 1px solid #ccc; font-size: 1rem; }
+        select, textarea, input, button { padding: 0.6rem; margin-top: 0.4rem; border-radius: 4px; border: 1px solid #ccc; font-size: 1rem; }
+        input[type="number"] { width: 100px; }
         button { background: #0066ff; color: white; border: none; cursor: pointer; }
         button:hover { background: #0052cc; }
+        button.secondary { background: #6c757d; }
+        button.secondary:hover { background: #5a6268; }
+        button.danger { background: #dc3545; }
+        button.danger:hover { background: #c82333; }
+        button.success { background: #28a745; }
+        button.success:hover { background: #218838; }
         .mensaje { padding: 0.8rem; margin: 0.5rem 0; border-radius: 6px; }
         .entrante { background: #e9f5ff; }
         .saliente { background: #e6ffed; text-align: right; }
+        .sistema { background: #fff3cd; text-align: center; font-style: italic; }
         .meta { font-size: 0.75rem; color: #666; }
         #respuesta { margin-top: 1rem; }
-        .acciones { display: flex; gap: 1rem; margin-top: 1rem; }
+        .acciones { display: flex; gap: 1rem; margin-top: 1rem; flex-wrap: wrap; align-items: end; }
+        .stats { display: flex; gap: 2rem; margin: 1rem 0; padding: 1rem; background: #f8f9fa; border-radius: 6px; }
+        .stat { font-size: 1.1rem; }
+        .stat strong { display: block; font-size: 1.5rem; color: #0066ff; }
+        #estado { margin-top: 1rem; padding: 0.8rem; border-radius: 4px; background: #f8f9fa; }
+        .bloqueado-info { color: #dc3545; font-weight: 600; margin-top: 0.5rem; }
     </style>
 </head>
 <body>
     <div class="container">
         <h1>WhatsApp - Talleres de IA</h1>
 
-        <div class="acciones">
-            <button onclick="enviarLote()">Enviar lote de 50</button>
-            <button onclick="cargarConversaciones()">Recargar conversaciones</button>
+        <div class="stats">
+            <div class="stat">Pendientes<strong id="pendientes">{{ pendientes }}</strong></div>
+            <div class="stat">Bloqueados<strong id="bloqueados">0</strong></div>
         </div>
 
+        <h2>Enviar mensajes</h2>
+        <div class="acciones">
+            <div>
+                <label for="cantidad">Cantidad a enviar</label>
+                <input type="number" id="cantidad" value="50" min="1" max="1000">
+            </div>
+            <button onclick="enviarLote()">Enviar lote</button>
+            <button class="secondary" onclick="enviarPrueba()">Enviar 1 de prueba</button>
+        </div>
+
+        <h2>Conversaciones</h2>
         <label for="telefono">Número de contacto</label>
         <select id="telefono" onchange="cargarConversaciones()">
             <option value="">Selecciona un número</option>
@@ -37,7 +61,15 @@
             {% endfor %}
         </select>
 
-        <h2>Conversación</h2>
+        <div id="info-contacto"></div>
+
+        <div class="acciones">
+            <button class="danger" onclick="bloquear()">Bloquear número</button>
+            <button class="success" onclick="desbloquear()">Desbloquear número</button>
+            <button class="secondary" onclick="cargarConversaciones()">Recargar</button>
+        </div>
+
+        <h3>Últimas 20 conversaciones</h3>
         <div id="conversacion"></div>
 
         <div id="respuesta">
@@ -46,20 +78,47 @@
             <button onclick="responder()">Enviar respuesta</button>
         </div>
 
-        <p id="estado" style="margin-top:1rem; color:#333;"></p>
+        <p id="estado"></p>
     </div>
 
     <script>
+        async function cargarStats() {
+            try {
+                const res = await fetch('/api/stats');
+                const data = await res.json();
+                document.getElementById('pendientes').innerText = data.pendientes;
+                document.getElementById('bloqueados').innerText = data.bloqueados;
+            } catch (e) {
+                console.error('Error cargando stats:', e);
+            }
+        }
+        cargarStats();
+
         async function enviarLote() {
-            document.getElementById('estado').innerText = 'Enviando lote...';
+            const cantidad = parseInt(document.getElementById('cantidad').value) || 50;
+            await ejecutarEnvio(cantidad);
+        }
+
+        async function enviarPrueba() {
+            await ejecutarEnvio(1);
+        }
+
+        async function ejecutarEnvio(cantidad) {
+            document.getElementById('estado').innerText = `Enviando ${cantidad} mensaje(s)...`;
             try {
                 const res = await fetch('/api/send-batch', {
                     method: 'POST',
                     headers: {'Content-Type': 'application/json'},
-                    body: JSON.stringify({limit: 50})
+                    body: JSON.stringify({limit: cantidad})
                 });
                 const data = await res.json();
                 document.getElementById('estado').innerText = `Enviados: ${data.enviados}, Errores: ${data.errores}`;
+                if (data.errores > 0 && data.detalles) {
+                    const errores = data.detalles.filter(d => d.status === 'error').map(d => `${d.telefono}: ${d.error}`).join('\n');
+                    console.error('Errores:', errores);
+                    document.getElementById('estado').innerText += '\n' + errores.substring(0, 500);
+                }
+                cargarStats();
             } catch (e) {
                 document.getElementById('estado').innerText = 'Error: ' + e.message;
             }
@@ -67,17 +126,58 @@
 
         async function cargarConversaciones() {
             const phone = document.getElementById('telefono').value;
-            if (!phone) return;
-            const res = await fetch('/api/conversations?telefono=' + encodeURIComponent(phone));
+            if (!phone) {
+                document.getElementById('conversacion').innerHTML = '';
+                document.getElementById('info-contacto').innerHTML = '';
+                return;
+            }
+            const res = await fetch('/api/conversations?telefono=' + encodeURIComponent(phone) + '&limite=20');
             const data = await res.json();
             const box = document.getElementById('conversacion');
             box.innerHTML = '';
             data.conversaciones.forEach(c => {
                 const div = document.createElement('div');
                 div.className = 'mensaje ' + c.tipo;
-                div.innerHTML = `<div>${escapeHtml(c.mensaje)}</div><div class="meta">${c.fecha} · ${c.agente}</div>`;
+                div.innerHTML = `<div>${escapeHtml(c.mensaje)}</div><div class="meta">${formatearFecha(c.fecha)} · ${c.agente}</div>`;
                 box.appendChild(div);
             });
+
+            document.getElementById('info-contacto').innerHTML = `<p>Conversaciones cargadas: ${data.conversaciones.length}</p>`;
+        }
+
+        async function bloquear() {
+            const phone = document.getElementById('telefono').value;
+            if (!phone) return alert('Selecciona un número');
+            if (!confirm('¿Bloquear este número? No se le enviarán más mensajes.')) return;
+            try {
+                const res = await fetch('/api/block', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({telefono: phone})
+                });
+                if (!res.ok) throw new Error(await res.text());
+                document.getElementById('estado').innerText = 'Número bloqueado';
+                cargarStats();
+            } catch (e) {
+                document.getElementById('estado').innerText = 'Error: ' + e.message;
+            }
+        }
+
+        async function desbloquear() {
+            const phone = document.getElementById('telefono').value;
+            if (!phone) return alert('Selecciona un número');
+            try {
+                const res = await fetch('/api/unblock', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({telefono: phone})
+                });
+                if (!res.ok) throw new Error(await res.text());
+                document.getElementById('estado').innerText = 'Número desbloqueado';
+                cargarStats();
+            } catch (e) {
+                document.getElementById('estado').innerText = 'Error: ' + e.message;
+            }
         }
 
         async function responder() {
@@ -104,6 +204,16 @@
             const div = document.createElement('div');
             div.textContent = text;
             return div.innerHTML;
+        }
+
+        function formatearFecha(fecha) {
+            if (!fecha) return '';
+            try {
+                const d = new Date(fecha);
+                return d.toLocaleString('es-CO');
+            } catch (e) {
+                return fecha;
+            }
         }
     </script>
 </body>
